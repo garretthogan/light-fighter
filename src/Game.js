@@ -2,12 +2,7 @@ import * as THREE from 'three'
 import { Stage } from './Stage.js'
 import { Player } from './Player.js'
 import { Projectile } from './Projectile.js'
-import { Target } from './Target.js'
-import { TwoStageTarget } from './TwoStageTarget.js'
-import { CapsuleTarget } from './CapsuleTarget.js'
-import { ArmoredSphereTarget } from './ArmoredSphereTarget.js'
-import { Explosion } from './Explosion.js'
-import { PowerUpEffect } from './PowerUpEffect.js'
+import { SpawnFactory } from './SpawnFactory.js'
 
 export class Game {
   constructor(canvas) {
@@ -24,7 +19,9 @@ export class Game {
     this.pendingRespawns = []
     this.pendingBigBoxRespawns = []
     this.RESPAWN_DELAY_MS = 7000
-    this.BIG_BOX_RESPAWN_MS = 10000
+    this.BIG_BOX_RESPAWN_MS_MIN = 10000
+    this.BIG_BOX_RESPAWN_MS_MAX = 15000
+    this.BIG_BOX_PREVIEW_BEFORE_MS = 5000
     this.bigBoxPositions = [
       [14, 0, 14],
       [-14, 0, 14],
@@ -38,6 +35,7 @@ export class Game {
     this.aimPlaneIntersect = new THREE.Vector3()
     this._cameraDirection = new THREE.Vector3()
     this._unprojectOrigin = new THREE.Vector3()
+    this._projectVec = new THREE.Vector3()
     this.clock = new THREE.Clock()
     this.animationId = null
     this.keys = {}
@@ -57,12 +55,13 @@ export class Game {
     this.gameOver = false
     this.started = false
     this.paused = false
+    const stored = typeof localStorage !== 'undefined' && localStorage.getItem('dotShooterMasterVolume')
+    this._masterVolume = stored != null ? Math.min(1, Math.max(0, parseFloat(stored))) : 1
     this._prevGamepadA = false
     this._prevGamepadStart = false
     this.spawnPreviewPositions = []
     this.spawnPreviewCircles = []
     this.SPAWN_PREVIEW_MS = 2000
-    this.BIG_BOX_PREVIEW_MS = 6000
     this.lastArmoredSphereSpawn = 0
     this.armoredSpawnPreviewPositions = []
     this.armoredSpawnPreviewCircles = []
@@ -109,45 +108,95 @@ export class Game {
   }
 
   _createSpawnPreviewCircle(x, z) {
-    const geometry = new THREE.RingGeometry(0.15, 0.5, 24)
-    const material = new THREE.MeshBasicMaterial({
-      color: 0xff4d4d,
-      transparent: true,
-      opacity: 0.6,
-      side: THREE.DoubleSide
-    })
-    const circle = new THREE.Mesh(geometry, material)
-    circle.rotation.x = -Math.PI / 2
-    circle.position.set(x, 0.01, z)
-    return circle
+    return this.spawnFactory.createMovingSpherePreviewCircle(x, z)
   }
 
   _createArmoredSpawnPreviewCircle(x, z) {
-    const geometry = new THREE.RingGeometry(0.2, 0.6, 24)
-    const material = new THREE.MeshBasicMaterial({
-      color: 0xff8800,
-      transparent: true,
-      opacity: 0.6,
-      side: THREE.DoubleSide
-    })
-    const circle = new THREE.Mesh(geometry, material)
-    circle.rotation.x = -Math.PI / 2
-    circle.position.set(x, 0.01, z)
-    return circle
+    return this.spawnFactory.createArmoredSpherePreviewCircle(x, z)
   }
 
   _createBigBoxPreviewCircle(x, z) {
-    const geometry = new THREE.RingGeometry(0.4, 0.9, 24)
-    const material = new THREE.MeshBasicMaterial({
-      color: 0x00d4ff,
-      transparent: true,
-      opacity: 0.5,
-      side: THREE.DoubleSide
-    })
-    const circle = new THREE.Mesh(geometry, material)
-    circle.rotation.x = -Math.PI / 2
-    circle.position.set(x, 0.01, z)
-    return circle
+    return this.spawnFactory.createBigBoxPreviewCircle(x, z)
+  }
+
+  _isPositionOnScreen(x, y, z) {
+    if (!this.camera) return false
+    this.camera.updateMatrixWorld(true)
+    this._projectVec.set(x, y, z)
+    this._projectVec.project(this.camera)
+    return this._projectVec.x >= -1 && this._projectVec.x <= 1 && this._projectVec.y >= -1 && this._projectVec.y <= 1 && this._projectVec.z >= -1 && this._projectVec.z <= 1
+  }
+
+  _startBigBoxBootupSound(r) {
+    if (this._isMenuOpen()) return
+    const ctx = this._audioContext
+    const buf = this._bootupSoundBuffer
+    const player = this.player?.mesh?.position
+    if (!ctx || !buf || !player || ctx.state === 'closed' || r._bootupSource) return
+    const startPlayback = () => {
+      if (r._bootupSource) return
+      try {
+        const now = ctx.currentTime
+        const startOffset = r._bootupOffset != null ? r._bootupOffset % buf.duration : 0
+        const listener = ctx.listener
+        listener.positionX.setValueAtTime(player.x, now)
+        listener.positionY.setValueAtTime(player.y, now)
+        listener.positionZ.setValueAtTime(player.z, now)
+        const panner = ctx.createPanner()
+        panner.refDistance = 3
+        panner.maxDistance = 35
+        panner.rolloffFactor = 1.2
+        panner.positionX.setValueAtTime(r.x, now)
+        panner.positionY.setValueAtTime(r.y, now)
+        panner.positionZ.setValueAtTime(r.z, now)
+        const gainNode = ctx.createGain()
+        gainNode.gain.setValueAtTime(0.2 * this._masterVolume, now)
+        const src = ctx.createBufferSource()
+        src.buffer = buf
+        src.loop = true
+        src.playbackRate.setValueAtTime(2, now)
+        src.connect(panner)
+        panner.connect(gainNode)
+        gainNode.connect(ctx.destination)
+        src.start(0, startOffset)
+        r._bootupSource = src
+        r._bootupStartTime = now
+      } catch (_) {}
+    }
+    if (ctx.state === 'suspended') {
+      ctx.resume().then(startPlayback).catch(() => {})
+    } else {
+      startPlayback()
+    }
+  }
+
+  _pauseBigBoxBootupSound(r) {
+    if (!r._bootupSource) return
+    const ctx = this._audioContext
+    const buf = this._bootupSoundBuffer
+    try {
+      if (ctx && buf && r._bootupStartTime != null) {
+        const elapsed = ctx.currentTime - r._bootupStartTime
+        const prior = r._bootupOffset != null ? r._bootupOffset : 0
+        r._bootupOffset = (prior + elapsed) % buf.duration
+      }
+      r._bootupSource.stop(0)
+    } catch (_) {}
+    r._bootupSource = null
+  }
+
+  _stopBigBoxBootupSound(r) {
+    if (!r._bootupSource) return
+    try {
+      r._bootupSource.stop(0)
+    } catch (_) {}
+    r._bootupSource = null
+    r._bootupOffset = undefined
+    r._bootupStartTime = undefined
+  }
+
+  _pauseAllBigBoxBootupSounds() {
+    for (const r of this.pendingBigBoxRespawns) this._pauseBigBoxBootupSound(r)
   }
 
   _getDifficulty() {
@@ -190,10 +239,110 @@ export class Game {
     })
   }
 
+  _isMenuOpen() {
+    return (
+      (this.startMenuEl && this.startMenuEl.style.display !== 'none') ||
+      (this.pauseMenuEl && this.pauseMenuEl.style.display !== 'none') ||
+      (this.gameOverEl && this.gameOverEl.style.display !== 'none')
+    )
+  }
+
+  _playFireSound() {
+    if (this._isMenuOpen() || !this._lasergunUrl) return
+    try {
+      const s = new Audio(this._lasergunUrl)
+      s.volume = 0.5 * this._masterVolume
+      s.play().catch(() => {})
+    } catch (_) {}
+  }
+
+  _playHitSound(hitPoint = null) {
+    if (this._isMenuOpen()) return
+    const baseGain = 0.28 * this._masterVolume
+    const ctx = this._audioContext
+    const buf = this._hitSoundBuffer
+    const player = this.player?.mesh?.position
+    if (ctx && buf && hitPoint && player && ctx.state !== 'closed') {
+      try {
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {})
+        const now = ctx.currentTime
+        const listener = ctx.listener
+        listener.positionX.setValueAtTime(player.x, now)
+        listener.positionY.setValueAtTime(player.y, now)
+        listener.positionZ.setValueAtTime(player.z, now)
+        const panner = ctx.createPanner()
+        panner.refDistance = 3
+        panner.maxDistance = 35
+        panner.rolloffFactor = 1.2
+        panner.positionX.setValueAtTime(hitPoint.x, now)
+        panner.positionY.setValueAtTime(hitPoint.y, now)
+        panner.positionZ.setValueAtTime(hitPoint.z, now)
+        const gainNode = ctx.createGain()
+        gainNode.gain.setValueAtTime(baseGain, now)
+        const src = ctx.createBufferSource()
+        src.buffer = buf
+        src.connect(panner)
+        panner.connect(gainNode)
+        gainNode.connect(ctx.destination)
+        src.start(0)
+      } catch (_) {
+        this._playHitSoundFallback(hitPoint, baseGain)
+      }
+      return
+    }
+    this._playHitSoundFallback(hitPoint, baseGain)
+  }
+
+  _playHitSoundFallback(hitPoint, baseGain) {
+    if (!this._hitSoundUrl) return
+    try {
+      const s = new Audio(this._hitSoundUrl)
+      let vol = baseGain
+      if (hitPoint && this.player?.mesh?.position) {
+        const dx = hitPoint.x - this.player.mesh.position.x
+        const dz = hitPoint.z - this.player.mesh.position.z
+        const d = Math.sqrt(dx * dx + dz * dz)
+        vol *= 1 / (1 + d / 10)
+      }
+      s.volume = Math.min(1, vol)
+      s.play().catch(() => {})
+    } catch (_) {}
+  }
+
+  _playPowerUpSound() {
+    if (this._isMenuOpen() || !this._powerUpSoundUrl) return
+    try {
+      const s = new Audio(this._powerUpSoundUrl)
+      s.volume = 0.5 * this._masterVolume
+      s.play().catch(() => {})
+    } catch (_) {}
+  }
+
   async init() {
     const baseUrl = typeof window !== 'undefined' && window.location
       ? window.location.origin + (import.meta.env.BASE_URL || '/')
       : ''
+    this._lasergunUrl = baseUrl + 'lasergun.wav'
+    this._hitSoundUrl = baseUrl + 'hit.wav'
+    this._powerUpSoundUrl = baseUrl + 'powerup.wav'
+    this._bootupSoundUrl = baseUrl + 'bootingup.wav'
+    this._hitSoundBuffer = null
+    this._bootupSoundBuffer = null
+    this._audioContext = null
+    if (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) {
+      const Ctx = window.AudioContext || window.webkitAudioContext
+      this._audioContext = new Ctx()
+      fetch(this._hitSoundUrl)
+        .then((r) => r.arrayBuffer())
+        .then((buf) => this._audioContext.decodeAudioData(buf))
+        .then((decoded) => { this._hitSoundBuffer = decoded })
+        .catch(() => {})
+      fetch(this._bootupSoundUrl)
+        .then((r) => r.arrayBuffer())
+        .then((buf) => this._audioContext.decodeAudioData(buf))
+        .then((decoded) => { this._bootupSoundBuffer = decoded })
+        .catch(() => {})
+    }
     this.floorTexture = await this._loadTexture(`${baseUrl}texture_01.png`).catch(() => null)
     this.sphereTexture = await this._loadTexture(`${baseUrl}texture_03.png`).catch(() => null)
     this.boxTexture = await this._loadTexture(`${baseUrl}texture_07.png`).catch(() => null)
@@ -260,6 +409,17 @@ export class Game {
     this.player = new Player()
     this.scene.add(this.player.mesh)
 
+    this.spawnFactory = new SpawnFactory({
+      scene: this.scene,
+      player: this.player,
+      clock: this.clock,
+      boxTexture: this.boxTexture,
+      abilityBoxTexture: this.abilityBoxTexture,
+      sphereTexture: this.sphereTexture,
+      smallSphereInstanced: this.smallSphereInstanced,
+      largeSphereInstanced: this.largeSphereInstanced
+    })
+
     this.targetPositions = [
       [4, 0, 4],
       [-5, 0, 3],
@@ -268,24 +428,26 @@ export class Game {
       [0, 0, 6]
     ]
     for (const [x, y, z] of this.targetPositions) {
-      const target = new Target(x, y, z, this.boxTexture)
+      const target = this.spawnFactory.createTarget(x, y, z)
       this.targets.push(target)
       this.scene.add(target.mesh)
     }
     for (const [x, y, z] of this.bigBoxPositions) {
-      const bigBox = new TwoStageTarget(x, y, z, this.boxTexture, this.abilityBoxTexture, this.player.autoAimFire, this.clock.getElapsedTime())
+      const bigBox = this.spawnFactory.createTwoStageTarget(x, y, z)
       this.targets.push(bigBox)
       this.scene.add(bigBox.mesh)
     }
     const smallIdx0 = this._allocateSmallSphereIndex()
-    const capsuleTarget = new CapsuleTarget(this.player.mesh, this.sphereTexture, null, smallIdx0 != null ? this.smallSphereInstanced : null, smallIdx0 ?? null, 0)
+    const capsuleTarget = this.spawnFactory.createCapsuleTarget(null, smallIdx0, 0)
     this.targets.push(capsuleTarget)
     this.scene.add(capsuleTarget.mesh)
 
     window.addEventListener('resize', () => this.onResize())
     window.addEventListener('mousemove', (e) => this.onMouseMove(e))
-    this.canvas.addEventListener('click', (e) => this.onClick(e))
-    this.canvas.addEventListener('mousedown', (e) => e.preventDefault())
+    this.canvas.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      this.onFire()
+    })
     window.addEventListener('keydown', (e) => {
       this.keys[e.code] = true
       if (e.code === 'Space') e.preventDefault()
@@ -293,6 +455,7 @@ export class Game {
         if (this.started && !this.gameOver) {
           this.paused = !this.paused
           this.pauseMenuEl.style.display = this.paused ? 'flex' : 'none'
+          if (this.paused) this._pauseAllBigBoxBootupSounds()
         }
         e.preventDefault()
       }
@@ -319,9 +482,9 @@ export class Game {
     ]
     this.leaderboardEl = document.createElement('div')
     this.leaderboardEl.id = 'leaderboard-panel'
-    this.leaderboardEl.className = 'tui-panel'
+    this.leaderboardEl.className = 'tui-panel collapsed'
     this.leaderboardEl.innerHTML = `
-      <button type="button" class="tui-panel-header" aria-expanded="true">
+      <button type="button" class="tui-panel-header" aria-expanded="false">
         <span class="tui-panel-chevron" aria-hidden="true">▼</span>
         <span class="tui-panel-title">Leaderboard</span>
         <span id="fps-display" class="tui-fps-in-header"></span>
@@ -363,6 +526,10 @@ export class Game {
     this.startMenuEl.innerHTML = `
       <div class="tui-modal-card">
         <h2 class="tui-modal-title">Dot Shooter</h2>
+        <div class="tui-volume-row">
+          <label for="start-master-volume">Master volume</label>
+          <input type="range" id="start-master-volume" class="master-volume-input" min="0" max="100" value="${Math.round(this._masterVolume * 100)}">
+        </div>
         <button id="start-game-btn" class="tui-btn tui-btn-primary">Start Game</button>
       </div>
     `
@@ -376,11 +543,30 @@ export class Game {
     this.pauseMenuEl.innerHTML = `
       <div class="tui-modal-card">
         <h2 class="tui-modal-title">Paused</h2>
+        <div class="tui-volume-row">
+          <label for="pause-master-volume">Master volume</label>
+          <input type="range" id="pause-master-volume" class="master-volume-input" min="0" max="100" value="${Math.round(this._masterVolume * 100)}">
+        </div>
         <button id="resume-btn" class="tui-btn tui-btn-primary">Resume</button>
       </div>
     `
     this.canvas.parentElement.appendChild(this.pauseMenuEl)
     this.pauseMenuEl.querySelector('#resume-btn').addEventListener('click', () => this._onResume())
+    this._bindMasterVolumeInputs()
+  }
+
+  _bindMasterVolumeInputs() {
+    const container = this.canvas.parentElement
+    const inputs = container.querySelectorAll('.master-volume-input')
+    const game = this
+    inputs.forEach((input) => {
+      input.value = Math.round(game._masterVolume * 100)
+      input.addEventListener('input', () => {
+        game._masterVolume = Math.min(1, Math.max(0, parseFloat(input.value) / 100))
+        if (typeof localStorage !== 'undefined') localStorage.setItem('dotShooterMasterVolume', String(game._masterVolume))
+        container.querySelectorAll('.master-volume-input').forEach((el) => { el.value = input.value })
+      })
+    })
   }
 
   _onStartGame() {
@@ -399,6 +585,7 @@ export class Game {
     this.gameOverEl.querySelector('#game-over-time').textContent = this._formatTime(elapsed)
     this.gameOverEl.querySelector('#game-over-score').textContent = this.score
     this.gameOverEl.style.display = 'flex'
+    this._pauseAllBigBoxBootupSounds()
   }
 
   _hideGameOver() {
@@ -476,10 +663,11 @@ export class Game {
     return this.aimPlaneIntersect
   }
 
-  onClick() {
+  onFire() {
     if (this.gameOver) return
     const projectile = this.player.fire()
     if (projectile) {
+      this._playFireSound()
       this.projectiles.push(projectile)
       this.scene.add(projectile.mesh)
     }
@@ -513,6 +701,7 @@ export class Game {
     if (gamepad && gamepad.startPressed && !this._prevGamepadStart) {
       this.paused = true
       this.pauseMenuEl.style.display = 'flex'
+      this._pauseAllBigBoxBootupSounds()
       this._prevGamepadStart = true
       return
     }
@@ -521,6 +710,14 @@ export class Game {
     }
     const gamepadMove = gamepad && gamepad.move ? gamepad.move : null
     this.player.update(delta, this.keys, this.targets, gamepadMove)
+
+    if (this._audioContext && this._audioContext.state !== 'closed' && this.player?.mesh?.position) {
+      const p = this.player.mesh.position
+      const t = this._audioContext.currentTime
+      this._audioContext.listener.positionX.setValueAtTime(p.x, t)
+      this._audioContext.listener.positionY.setValueAtTime(p.y, t)
+      this._audioContext.listener.positionZ.setValueAtTime(p.z, t)
+    }
 
     if (gamepad && gamepad.aim) {
       this.player.setAimDirection(gamepad.aim.x, gamepad.aim.z)
@@ -532,6 +729,7 @@ export class Game {
     if (this.keys['Space'] || (gamepad && gamepad.fire)) {
       const projectile = this.player.fire()
       if (projectile) {
+        this._playFireSound()
         this.projectiles.push(projectile)
         this.scene.add(projectile.mesh)
       }
@@ -553,13 +751,14 @@ export class Game {
       }
       if (nearest) {
         this.player.setAimPoint(nearest.mesh.position)
-        const projectile = this.player.fire()
-        if (projectile) {
-          this.projectiles.push(projectile)
-          this.scene.add(projectile.mesh)
-        }
+      const projectile = this.player.fire()
+      if (projectile) {
+        this._playFireSound()
+        this.projectiles.push(projectile)
+        this.scene.add(projectile.mesh)
       }
     }
+  }
 
     const px = this.player.mesh.position.x
     const pz = this.player.mesh.position.z
@@ -606,52 +805,57 @@ export class Game {
         this.scene.remove(p.mesh)
         this.projectiles.splice(i, 1)
         if (hit.remove) continue
-        const explosion = new Explosion(hit.point.x, hit.point.y, hit.point.z)
+        const explosion = this.spawnFactory.createExplosion(hit.point.x, hit.point.y, hit.point.z)
         this.explosions.push(explosion)
         this.scene.add(explosion.mesh)
         if (hit.target) {
+          this._playHitSound(hit.point)
           const pos = hit.target.mesh.position
           if (typeof hit.target.shrink === 'function' && hit.target.stage === 'big') {
             this.score += 5
             hit.target.shrink()
-            const targetExplosion = new Explosion(pos.x, pos.y, pos.z)
+            const targetExplosion = this.spawnFactory.createExplosion(pos.x, pos.y, pos.z)
             this.explosions.push(targetExplosion)
             this.scene.add(targetExplosion.mesh)
           } else if (hit.target.respawnAsBigBox) {
             if (hit.target.willGrantAbility) {
+              this._playPowerUpSound()
               if (!this.player.autoAimFire) {
                 this.player.autoAimFire = true
               } else {
                 this.player.increaseRateOfFire()
               }
-              const powerUp = new PowerUpEffect(pos.x, pos.y, pos.z)
+              const powerUp = this.spawnFactory.createPowerUpEffect(pos.x, pos.y, pos.z)
               this.powerUpEffects.push(powerUp)
               this.scene.add(powerUp.group)
             }
             this.score += hit.target.points
             this.scene.remove(hit.target.mesh)
             this.targets = this.targets.filter((t) => t !== hit.target)
+            const now = performance.now()
+            const delayMs = this.BIG_BOX_RESPAWN_MS_MIN + Math.random() * (this.BIG_BOX_RESPAWN_MS_MAX - this.BIG_BOX_RESPAWN_MS_MIN)
             this.pendingBigBoxRespawns.push({
               x: pos.x,
               y: pos.y - 0.3,
               z: pos.z,
-              respawnAt: performance.now() + this.BIG_BOX_RESPAWN_MS
+              respawnAt: now + delayMs
             })
-            const targetExplosion = new Explosion(pos.x, pos.y, pos.z)
+            const targetExplosion = this.spawnFactory.createExplosion(pos.x, pos.y, pos.z)
             this.explosions.push(targetExplosion)
             this.scene.add(targetExplosion.mesh)
           } else if (hit.target.shellHealth !== undefined) {
             hit.target.shellHealth--
-            const targetExplosion = new Explosion(pos.x, pos.y, pos.z)
+            const targetExplosion = this.spawnFactory.createExplosion(pos.x, pos.y, pos.z)
             this.explosions.push(targetExplosion)
             this.scene.add(targetExplosion.mesh)
             if (hit.target.shellHealth <= 0) {
               this.score += hit.target.points
+              const center = hit.target._position ? hit.target._position.clone() : hit.target.mesh.position.clone()
               this._freeMovingSphereTarget(hit.target)
               this.scene.remove(hit.target.mesh)
               this.targets = this.targets.filter((t) => t !== hit.target)
               const innerIdx = this._allocateSmallSphereIndex()
-              const inner = new CapsuleTarget(this.player.mesh, this.sphereTexture, { x: pos.x, z: pos.z }, innerIdx != null ? this.smallSphereInstanced : null, innerIdx ?? null, this._getDifficulty())
+              const inner = this.spawnFactory.createCapsuleTarget({ x: center.x, z: center.z }, innerIdx, this._getDifficulty())
               this.targets.push(inner)
               this.scene.add(inner.mesh)
             }
@@ -668,7 +872,7 @@ export class Game {
                 respawnAt: performance.now() + this.RESPAWN_DELAY_MS
               })
             }
-            const targetExplosion = new Explosion(pos.x, pos.y, pos.z)
+            const targetExplosion = this.spawnFactory.createExplosion(pos.x, pos.y, pos.z)
             this.explosions.push(targetExplosion)
             this.scene.add(targetExplosion.mesh)
           }
@@ -693,7 +897,7 @@ export class Game {
     for (let i = this.pendingRespawns.length - 1; i >= 0; i--) {
       const r = this.pendingRespawns[i]
       if (now >= r.respawnAt) {
-        const target = new Target(r.x, r.y, r.z, this.boxTexture)
+        const target = this.spawnFactory.createTarget(r.x, r.y, r.z)
         this.targets.push(target)
         this.scene.add(target.mesh)
         this.pendingRespawns.splice(i, 1)
@@ -709,18 +913,24 @@ export class Game {
     }
     for (let i = this.pendingBigBoxRespawns.length - 1; i >= 0; i--) {
       const r = this.pendingBigBoxRespawns[i]
-      const timeUntilBigBox = r.respawnAt - now
-      if (timeUntilBigBox <= this.BIG_BOX_PREVIEW_MS && timeUntilBigBox > 0 && !r.previewCircle) {
+      const timeUntilSpawn = r.respawnAt - now
+      if (timeUntilSpawn <= this.BIG_BOX_PREVIEW_BEFORE_MS && timeUntilSpawn > 0 && !r.previewCircle) {
         r.previewCircle = this._createBigBoxPreviewCircle(r.x, r.z)
         this.scene.add(r.previewCircle)
       }
+      if (r.previewCircle) {
+        const onScreen = this._isPositionOnScreen(r.x, r.y, r.z)
+        if (onScreen && !r._bootupSource) this._startBigBoxBootupSound(r)
+        else if (!onScreen && r._bootupSource) this._pauseBigBoxBootupSound(r)
+      }
       if (now >= r.respawnAt) {
+        this._stopBigBoxBootupSound(r)
         if (r.previewCircle) {
           this.scene.remove(r.previewCircle)
         }
         const forceGreen = this.forceNextBigBoxGreen
         if (forceGreen) this.forceNextBigBoxGreen = false
-        const bigBox = new TwoStageTarget(r.x, r.y, r.z, this.boxTexture, this.abilityBoxTexture, this.player.autoAimFire, this.clock.getElapsedTime(), forceGreen)
+        const bigBox = this.spawnFactory.createTwoStageTarget(r.x, r.y, r.z, { forceAbilityGrant: forceGreen })
         this.targets.push(bigBox)
         this.scene.add(bigBox.mesh)
         this.pendingBigBoxRespawns.splice(i, 1)
@@ -739,7 +949,7 @@ export class Game {
       for (let s = 0; s < spawnCount; s++) {
         let spawned = false
         for (let attempt = 0; attempt < 15 && !spawned; attempt++) {
-          const movingSphere = new CapsuleTarget(this.player.mesh, this.sphereTexture)
+          const movingSphere = this.spawnFactory.createCapsuleTarget(null, null, this._getDifficulty())
           const tooClose = toCheck.some(
             (other) => movingSphere.mesh.position.distanceToSquared(other.mesh.position) < sepSq
           )
@@ -761,7 +971,7 @@ export class Game {
       if (this.spawnPreviewPositions.length > 0) {
         for (const pos of this.spawnPreviewPositions) {
           const smallIdxS = this._allocateSmallSphereIndex()
-          const movingSphere = new CapsuleTarget(this.player.mesh, this.sphereTexture, pos, smallIdxS != null ? this.smallSphereInstanced : null, smallIdxS ?? null, this._getDifficulty())
+          const movingSphere = this.spawnFactory.createCapsuleTarget(pos, smallIdxS, this._getDifficulty())
           this.targets.push(movingSphere)
           this.scene.add(movingSphere.mesh)
         }
@@ -777,7 +987,7 @@ export class Game {
           let spawned = false
           for (let attempt = 0; attempt < 15 && !spawned; attempt++) {
             const smallIdxF = this._allocateSmallSphereIndex()
-            const movingSphere = new CapsuleTarget(this.player.mesh, this.sphereTexture, null, smallIdxF != null ? this.smallSphereInstanced : null, smallIdxF ?? null, this._getDifficulty())
+            const movingSphere = this.spawnFactory.createCapsuleTarget(null, smallIdxF, this._getDifficulty())
             const tooClose = toCheck.some(
               (other) => movingSphere.mesh.position.distanceToSquared(other.mesh.position) < sepSq
             )
@@ -812,7 +1022,7 @@ export class Game {
       for (let s = 0; s < armoredCount; s++) {
         let placed = false
         for (let attempt = 0; attempt < 25 && !placed; attempt++) {
-          const armored = new ArmoredSphereTarget(this.player.mesh, this.sphereTexture)
+          const armored = this.spawnFactory.createArmoredSphereTarget(null, null)
           const tooClose = armoredToCheck.some(
             (pos) => armored.mesh.position.distanceToSquared(pos) < armoredSepSq
           )
@@ -834,7 +1044,7 @@ export class Game {
       if (this.armoredSpawnPreviewPositions.length > 0) {
         for (const pos of this.armoredSpawnPreviewPositions) {
           const largeIdxS = this._allocateLargeSphereIndex()
-          const armored = new ArmoredSphereTarget(this.player.mesh, this.sphereTexture, pos, largeIdxS != null ? this.largeSphereInstanced : null, largeIdxS ?? null)
+          const armored = this.spawnFactory.createArmoredSphereTarget(pos, largeIdxS)
           this.targets.push(armored)
           this.scene.add(armored.mesh)
         }
@@ -850,7 +1060,7 @@ export class Game {
           let armoredSpawned = false
           for (let attempt = 0; attempt < 25 && !armoredSpawned; attempt++) {
             const largeIdxF = this._allocateLargeSphereIndex()
-            const armored = new ArmoredSphereTarget(this.player.mesh, this.sphereTexture, null, largeIdxF != null ? this.largeSphereInstanced : null, largeIdxF ?? null)
+            const armored = this.spawnFactory.createArmoredSphereTarget(null, largeIdxF)
             const tooClose = toCheckArmored.some(
               (other) => armored.mesh.position.distanceToSquared(other.mesh.position) < armoredSepSq
             )
@@ -897,6 +1107,7 @@ export class Game {
     this.armoredSpawnPreviewCircles = []
     this.armoredSpawnPreviewPositions = []
     this.pendingBigBoxRespawns.forEach((r) => {
+      this._stopBigBoxBootupSound(r)
       if (r.previewCircle) this.scene.remove(r.previewCircle)
     })
     this.scene.remove(this.player.mesh)
@@ -916,18 +1127,20 @@ export class Game {
 
     this.player = new Player()
     this.scene.add(this.player.mesh)
+    this.spawnFactory.ctx.player = this.player
+    this.spawnFactory.ctx.clock = this.clock
     for (const [x, y, z] of this.targetPositions) {
-      const target = new Target(x, y, z, this.boxTexture)
+      const target = this.spawnFactory.createTarget(x, y, z)
       this.targets.push(target)
       this.scene.add(target.mesh)
     }
     for (const [x, y, z] of this.bigBoxPositions) {
-      const bigBox = new TwoStageTarget(x, y, z, this.boxTexture, this.abilityBoxTexture, this.player.autoAimFire, this.clock.getElapsedTime())
+      const bigBox = this.spawnFactory.createTwoStageTarget(x, y, z)
       this.targets.push(bigBox)
       this.scene.add(bigBox.mesh)
     }
     const smallIdxR = this._allocateSmallSphereIndex()
-    const capsuleTarget = new CapsuleTarget(this.player.mesh, this.sphereTexture, null, smallIdxR != null ? this.smallSphereInstanced : null, smallIdxR ?? null, 0)
+    const capsuleTarget = this.spawnFactory.createCapsuleTarget(null, smallIdxR, 0)
     this.targets.push(capsuleTarget)
     this.scene.add(capsuleTarget.mesh)
 

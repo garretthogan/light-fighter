@@ -205,6 +205,28 @@ body,
   font-family: var(--tui-font);
 }
 
+.tui-volume-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  font-family: var(--tui-font);
+}
+
+.tui-volume-row label {
+  font-size: 0.9rem;
+  color: var(--tui-fg);
+  white-space: nowrap;
+}
+
+.tui-volume-row .master-volume-input {
+  flex: 1;
+  min-width: 100px;
+  height: 6px;
+  accent-color: var(--tui-cyan);
+  cursor: pointer;
+}
+
 .tui-btn {
   font-family: var(--tui-font);
   font-size: 1rem;
