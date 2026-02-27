@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 const SPAWN_DISTANCE = 5
-const SPEED = 0.48
+const SPEED = 0.75
 const WAVE_AMPLITUDE = 2.0
 const WAVE_FREQUENCY = 0.3
 const SPHERE_RADIUS = 0.5

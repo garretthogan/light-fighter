@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 
 const SPAWN_DISTANCE = 10
-const SPEED_MIN = 0.5
-const SPEED_MAX = 2.2
+const SPEED_MIN = 1.2
+const SPEED_MAX = 2.8
 const WAVE_AMPLITUDE_MAX = 1.8
 const WAVE_AMPLITUDE_MIN = 0.3
 const WAVE_FREQUENCY = 0.5

@@ -191,11 +191,13 @@ export class Game {
   }
 
   async init() {
-    const base = typeof window !== 'undefined' && window.location ? window.location.origin : ''
-    this.floorTexture = await this._loadTexture(`${base}/texture_01.png`).catch(() => null)
-    this.sphereTexture = await this._loadTexture(`${base}/texture_03.png`).catch(() => null)
-    this.boxTexture = await this._loadTexture(`${base}/texture_07.png`).catch(() => null)
-    this.abilityBoxTexture = await this._loadTexture(`${base}/texture_03green.png`).catch(() => null)
+    const baseUrl = typeof window !== 'undefined' && window.location
+      ? window.location.origin + (import.meta.env.BASE_URL || '/')
+      : ''
+    this.floorTexture = await this._loadTexture(`${baseUrl}texture_01.png`).catch(() => null)
+    this.sphereTexture = await this._loadTexture(`${baseUrl}texture_03.png`).catch(() => null)
+    this.boxTexture = await this._loadTexture(`${baseUrl}texture_07.png`).catch(() => null)
+    this.abilityBoxTexture = await this._loadTexture(`${baseUrl}texture_03green.png`).catch(() => null)
 
     this.scene = new THREE.Scene()
     const aspect = this.canvas.clientWidth / this.canvas.clientHeight
@@ -945,7 +947,6 @@ export class Game {
   start() {
     const MAX_DELTA = 0.1
     const MAX_SUB_STEPS = 3
-    const MIN_DELTA = 1 / 120
     const MAX_RAW_DELTA = 0.25
     this._leftoverDelta = 0
     this._lastFrameTime = performance.now() / 1000
@@ -953,7 +954,7 @@ export class Game {
       const now = performance.now() / 1000
       let rawDelta = now - this._lastFrameTime
       this._lastFrameTime = now
-      if (rawDelta <= 0 || rawDelta < MIN_DELTA) rawDelta = 1 / 60
+      if (rawDelta <= 0) rawDelta = 1 / 60
       if (rawDelta > MAX_RAW_DELTA) rawDelta = MAX_RAW_DELTA
       this._fps = Math.round(1 / rawDelta)
       let remaining = this._leftoverDelta + rawDelta

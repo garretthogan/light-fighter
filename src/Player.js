@@ -5,7 +5,7 @@ const PINK = 0xff00ff
 const FIRE_COOLDOWN_MS = 450
 const FIRE_COOLDOWN_MULTIPLIER_MIN = 0.4
 const RATE_OF_FIRE_UPGRADE_MULTIPLIER = 0.8
-const MOVE_SPEED = 2
+const MOVE_SPEED = 5
 const PLAYER_HEIGHT = 0.2
 const BOUNDS = 39
 const PLAYER_RADIUS = 0.25
@@ -123,7 +123,7 @@ export class Player {
     if (now - this.lastFireTime < cooldown) return null
     this.lastFireTime = now
     const origin = this.mesh.position.clone()
-    const velocity = this.aimDirection.clone().multiplyScalar(5)
+    const velocity = this.aimDirection.clone().multiplyScalar(18)
     velocity.y = 0
     return new Projectile(origin, velocity)
   }
