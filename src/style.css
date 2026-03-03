@@ -106,6 +106,38 @@ body,
   display: none;
 }
 
+#leaderboard-panel .tui-leaderboard-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tui-muted);
+  font-size: 11px;
+  padding: 8px 0;
+}
+
+#leaderboard-panel .tui-leaderboard-loading[hidden] {
+  display: none !important;
+}
+
+#leaderboard-panel .tui-leaderboard-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--tui-line);
+  border-top-color: var(--tui-cyan);
+  border-radius: 50%;
+  animation: tui-spinner 0.7s linear infinite;
+}
+
+@keyframes tui-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+#leaderboard-panel .tui-leaderboard-table-wrap[hidden] {
+  display: none;
+}
+
 #leaderboard-panel .tui-leaderboard-table {
   border-collapse: collapse;
   width: 100%;
@@ -203,6 +235,40 @@ body,
   font-size: 1rem;
   color: var(--tui-muted);
   font-family: var(--tui-font);
+}
+
+.tui-player-name-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 1rem;
+  font-family: var(--tui-font);
+}
+
+.tui-player-name-row label {
+  font-size: 0.9rem;
+  color: var(--tui-fg);
+}
+
+.tui-player-name-row .tui-player-name-input {
+  padding: 6px 8px;
+  font-family: var(--tui-font);
+  font-size: 14px;
+  color: var(--tui-fg);
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid var(--tui-line-strong);
+  border-radius: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.tui-player-name-row .tui-player-name-input::placeholder {
+  color: var(--tui-muted);
+}
+
+.tui-player-name-row .tui-player-name-input:focus {
+  outline: none;
+  border-color: var(--tui-cyan);
 }
 
 .tui-volume-row {

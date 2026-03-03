@@ -3,6 +3,7 @@ import { Stage } from './Stage.js'
 import { Player } from './Player.js'
 import { Projectile } from './Projectile.js'
 import { SpawnFactory } from './SpawnFactory.js'
+import { getLeaderboardScore, postScore, formatSurvivalTime } from './leaderboardApi.js'
 
 export class Game {
   constructor(canvas) {
@@ -468,18 +469,7 @@ export class Game {
     this.scoreEl = document.createElement('div')
     this.scoreEl.id = 'score-display'
     this.canvas.parentElement.appendChild(this.scoreEl)
-    this._leaderboardMock = [
-      { rank: 1, name: 'ACE', pts: 485, time: '12:34' },
-      { rank: 2, name: 'NOVA', pts: 412, time: '10:22' },
-      { rank: 3, name: 'BLUE', pts: 398, time: '9:58' },
-      { rank: 4, name: 'VIXEN', pts: 355, time: '8:41' },
-      { rank: 5, name: 'ZERO', pts: 320, time: '7:55' },
-      { rank: 6, name: 'ECHO', pts: 278, time: '6:12' },
-      { rank: 7, name: 'ROOK', pts: 245, time: '5:33' },
-      { rank: 8, name: 'JADE', pts: 198, time: '4:20' },
-      { rank: 9, name: 'SAGE', pts: 165, time: '3:45' },
-      { rank: 10, name: 'LYNX', pts: 112, time: '2:18' }
-    ]
+    this._leaderboardEntries = []
     this.leaderboardEl = document.createElement('div')
     this.leaderboardEl.id = 'leaderboard-panel'
     this.leaderboardEl.className = 'tui-panel collapsed'
@@ -490,21 +480,29 @@ export class Game {
         <span id="fps-display" class="tui-fps-in-header"></span>
       </button>
       <div class="tui-panel-content">
-        <table class="tui-leaderboard-table">
-          <thead><tr><th>#</th><th>Name</th><th>Pts</th><th>Time</th></tr></thead>
-          <tbody>
-            ${this._leaderboardMock.map((r) => `<tr><td>${r.rank}</td><td>${r.name}</td><td>${r.pts}</td><td>${r.time}</td></tr>`).join('')}
-          </tbody>
-        </table>
+        <div id="leaderboard-loading" class="tui-leaderboard-loading" aria-live="polite">
+          <span class="tui-leaderboard-spinner" aria-hidden="true"></span>
+          <span>Loading…</span>
+        </div>
+        <div id="leaderboard-table-wrap" class="tui-leaderboard-table-wrap" hidden>
+          <table class="tui-leaderboard-table">
+            <thead><tr><th>#</th><th>Name</th><th>Pts</th><th>Time</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     `
     this.canvas.parentElement.appendChild(this.leaderboardEl)
+    this.leaderboardLoadingEl = this.leaderboardEl.querySelector('#leaderboard-loading')
+    this.leaderboardTableWrapEl = this.leaderboardEl.querySelector('#leaderboard-table-wrap')
+    this.leaderboardTbody = this.leaderboardEl.querySelector('.tui-leaderboard-table tbody')
     this.fpsEl = this.leaderboardEl.querySelector('#fps-display')
     const header = this.leaderboardEl.querySelector('.tui-panel-header')
     header.addEventListener('click', () => {
       const collapsed = this.leaderboardEl.classList.toggle('collapsed')
       header.setAttribute('aria-expanded', !collapsed)
     })
+    this._fetchLeaderboard()
 
     this.gameOverEl = document.createElement('div')
     this.gameOverEl.id = 'game-over-overlay'
@@ -513,12 +511,20 @@ export class Game {
       <div class="tui-modal-card">
         <h2 class="tui-modal-title">Game Over</h2>
         <p class="tui-modal-stats"><span id="game-over-time">0:00</span> · <span id="game-over-score">0</span> pts</p>
+        <div class="tui-player-name-row">
+          <label for="game-over-player-name">Name</label>
+          <input type="text" id="game-over-player-name" class="tui-player-name-input" placeholder="Anonymous" maxlength="32" autocomplete="off">
+        </div>
         <button id="restart-btn" class="tui-btn tui-btn-danger">Restart</button>
       </div>
     `
     this.canvas.parentElement.appendChild(this.gameOverEl)
     this.gameOverEl.style.display = 'none'
-    this.gameOverEl.querySelector('#restart-btn').addEventListener('click', () => this.reset())
+    this._gameOverElapsed = 0
+    this.gameOverEl.querySelector('#restart-btn').addEventListener('click', () => {
+      this._submitGameOverScore()
+      this.reset()
+    })
 
     this.startMenuEl = document.createElement('div')
     this.startMenuEl.id = 'start-menu-overlay'
@@ -580,12 +586,35 @@ export class Game {
     this.paused = false
   }
 
+  _generateShortId() {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+    let id = ''
+    for (let i = 0; i < 6; i++) id += chars[Math.floor(Math.random() * chars.length)]
+    return id
+  }
+
   _showGameOver() {
     const elapsed = this.clock.getElapsedTime()
+    this._gameOverElapsed = elapsed
     this.gameOverEl.querySelector('#game-over-time').textContent = this._formatTime(elapsed)
     this.gameOverEl.querySelector('#game-over-score').textContent = this.score
     this.gameOverEl.style.display = 'flex'
     this._pauseAllBigBoxBootupSounds()
+  }
+
+  _submitGameOverScore() {
+    const elapsed = this._gameOverElapsed ?? 0
+    const nameInput = this.gameOverEl.querySelector('#game-over-player-name')
+    const rawName = nameInput ? nameInput.value.trim() : ''
+    const playerName = rawName || 'Anonymous'
+    const shortId = this._generateShortId()
+    const playerId = `${playerName}#${shortId}`
+    postScore({
+      score: this.score,
+      survival_time: Math.round(elapsed),
+      player_name: playerName,
+      player_id: playerId
+    }).then((result) => { if (result) this._fetchLeaderboard() }).catch(() => {})
   }
 
   _hideGameOver() {
@@ -596,6 +625,56 @@ export class Game {
     const m = Math.floor(seconds / 60)
     const s = Math.floor(seconds % 60)
     return `${m}:${s.toString().padStart(2, '0')}`
+  }
+
+  _refreshLeaderboardTable(entries) {
+    if (!this.leaderboardTbody || !Array.isArray(entries)) return
+    this.leaderboardTbody.innerHTML = entries
+      .map((r) => `<tr><td>${r.rank}</td><td>${r.name}</td><td>${r.pts}</td><td>${r.time}</td></tr>`)
+      .join('')
+  }
+
+  _showLeaderboardLoaded(entries, error = false) {
+    if (this.leaderboardLoadingEl) {
+      this.leaderboardLoadingEl.hidden = true
+      this.leaderboardLoadingEl.style.display = 'none'
+    }
+    if (this.leaderboardTableWrapEl) {
+      this.leaderboardTableWrapEl.hidden = false
+      this.leaderboardTableWrapEl.style.display = ''
+    }
+    if (error) {
+      this._leaderboardEntries = []
+      this._refreshLeaderboardTable([{ rank: '—', name: 'Unable to load', pts: '', time: '' }])
+    } else {
+      this._leaderboardEntries = entries
+      this._refreshLeaderboardTable(this._leaderboardEntries)
+    }
+  }
+
+  async _fetchLeaderboard() {
+    if (this.leaderboardLoadingEl) {
+      this.leaderboardLoadingEl.hidden = false
+      this.leaderboardLoadingEl.style.display = ''
+    }
+    if (this.leaderboardTableWrapEl) {
+      this.leaderboardTableWrapEl.hidden = true
+      this.leaderboardTableWrapEl.style.display = 'none'
+    }
+    try {
+      const raw = await getLeaderboardScore()
+      const entries = Array.isArray(raw)
+        ? raw.map((item, i) => ({
+            rank: i + 1,
+            name: item.player_name ?? 'Anonymous',
+            pts: item.score ?? 0,
+            time: formatSurvivalTime(item.survival_time ?? 0)
+          }))
+        : []
+      this._showLeaderboardLoaded(entries, false)
+    } catch (_) {
+      this._showLeaderboardLoaded([], true)
+    }
   }
 
   onResize() {
