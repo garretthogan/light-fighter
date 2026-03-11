@@ -10,6 +10,8 @@ const PLAYER_HEIGHT = 0.2
 const BOUNDS = 39
 const PLAYER_RADIUS = 0.25
 const TARGET_HALF = 0.3
+const STAMINA_MAX = 100
+const STAMINA_DRAIN_PER_SEC = 20
 
 export class Player {
   constructor() {
@@ -27,7 +29,12 @@ export class Player {
     this.lastFireTime = 0
     this.autoAimFire = false
     this.fireCooldownMultiplier = 1.0
+    this.stamina = STAMINA_MAX
     this._buildArrow()
+  }
+
+  addStamina(percent) {
+    this.stamina = Math.min(STAMINA_MAX, this.stamina + (percent / 100) * STAMINA_MAX)
   }
 
   _buildArrow() {
@@ -82,7 +89,8 @@ export class Player {
         dz /= len
       }
     }
-    if (dx !== 0 || dz !== 0) {
+    const canMove = this.stamina > 0
+    if ((dx !== 0 || dz !== 0) && canMove) {
       const ox = this.mesh.position.x
       const oz = this.mesh.position.z
       this.mesh.position.x += dx * MOVE_SPEED * delta
@@ -92,8 +100,11 @@ export class Player {
       if (this._overlapsTarget(targets)) {
         this.mesh.position.x = ox
         this.mesh.position.z = oz
+      } else {
+        this.stamina = Math.max(0, this.stamina - STAMINA_DRAIN_PER_SEC * delta)
       }
     }
+    this.tryingToMoveNoStamina = (dx !== 0 || dz !== 0) && !canMove
     this._updateRotation()
   }
 

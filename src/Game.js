@@ -79,6 +79,8 @@ export class Game {
     this._smallSphereFree = []
     this._largeSphereFree = []
     this._hiddenMatrix = new THREE.Matrix4().makeScale(0.001, 0.001, 0.001)
+    this.staminaGainMessages = []
+    this.STAMINA_GAIN_MESSAGE_DURATION_MS = 2500
   }
 
   _allocateSmallSphereIndex() {
@@ -469,6 +471,14 @@ export class Game {
     this.scoreEl = document.createElement('div')
     this.scoreEl.id = 'score-display'
     this.canvas.parentElement.appendChild(this.scoreEl)
+    this.staminaEl = document.createElement('div')
+    this.staminaEl.id = 'stamina-display'
+    this.canvas.parentElement.appendChild(this.staminaEl)
+    this.noStaminaEl = document.createElement('div')
+    this.noStaminaEl.id = 'no-stamina-message'
+    this.noStaminaEl.textContent = 'no stamina!'
+    this.noStaminaEl.setAttribute('aria-live', 'polite')
+    this.canvas.parentElement.appendChild(this.noStaminaEl)
     this._leaderboardEntries = []
     this.leaderboardEl = document.createElement('div')
     this.leaderboardEl.id = 'leaderboard-panel'
@@ -531,7 +541,7 @@ export class Game {
     this.startMenuEl.className = 'tui-overlay'
     this.startMenuEl.innerHTML = `
       <div class="tui-modal-card">
-        <h2 class="tui-modal-title">Dot Shooter</h2>
+        <h2 class="tui-modal-title">Light Fighter</h2>
         <div class="tui-volume-row">
           <label for="start-master-volume">Master volume</label>
           <input type="range" id="start-master-volume" class="master-volume-input" min="0" max="100" value="${Math.round(this._masterVolume * 100)}">
@@ -939,6 +949,18 @@ export class Game {
               this.scene.add(inner.mesh)
             }
           } else {
+            if (typeof hit.target.update === 'function') {
+              this.player.addStamina(10)
+              const el = document.createElement('div')
+              el.className = 'stamina-gain-message'
+              el.textContent = '10+ stamina'
+              this.canvas.parentElement.appendChild(el)
+              this.staminaGainMessages.push({
+                pos: { x: pos.x, y: pos.y + 0.5, z: pos.z },
+                endTime: performance.now() + this.STAMINA_GAIN_MESSAGE_DURATION_MS,
+                el
+              })
+            }
             this.score += (hit.target.points !== undefined ? hit.target.points : this.POINTS_PER_TARGET)
             this._freeMovingSphereTarget(hit.target)
             this.scene.remove(hit.target.mesh)
@@ -1169,9 +1191,49 @@ export class Game {
     this.timerEl.style.visibility = this.started ? 'visible' : 'hidden'
     if (this.fpsEl) this.fpsEl.textContent = `${this._fps ?? 0} FPS`
     this.scoreEl.style.visibility = this.started ? 'visible' : 'hidden'
+    this.staminaEl.style.visibility = this.started ? 'visible' : 'hidden'
     if (this.started && !this.gameOver) {
       this.timerEl.textContent = this._formatTime(this.clock.getElapsedTime())
       this.scoreEl.textContent = this.score
+      this.staminaEl.textContent = `Stamina: ${Math.round(this.player.stamina)}`
+    }
+    const showNoStamina = this.started && !this.gameOver && this.player.tryingToMoveNoStamina
+    this.noStaminaEl.style.display = showNoStamina ? 'block' : 'none'
+    if (showNoStamina && this.camera) {
+      this.camera.updateMatrixWorld(true)
+      this._projectVec.set(
+        this.player.mesh.position.x,
+        this.player.mesh.position.y + 0.8,
+        this.player.mesh.position.z
+      )
+      this._projectVec.project(this.camera)
+      const w = this.canvas.clientWidth
+      const h = this.canvas.clientHeight
+      const x = (this._projectVec.x * 0.5 + 0.5) * w
+      const y = (-this._projectVec.y * 0.5 + 0.5) * h
+      this.noStaminaEl.style.left = `${x}px`
+      this.noStaminaEl.style.top = `${y}px`
+    }
+    const now = performance.now()
+    const w = this.canvas.clientWidth
+    const h = this.canvas.clientHeight
+    if (this.camera) this.camera.updateMatrixWorld(true)
+    for (let i = this.staminaGainMessages.length - 1; i >= 0; i--) {
+      const msg = this.staminaGainMessages[i]
+      if (now >= msg.endTime) {
+        msg.el.remove()
+        this.staminaGainMessages.splice(i, 1)
+        continue
+      }
+      if (this.camera) {
+        this._projectVec.set(msg.pos.x, msg.pos.y, msg.pos.z)
+        this._projectVec.project(this.camera)
+        const x = (this._projectVec.x * 0.5 + 0.5) * w
+        const y = (-this._projectVec.y * 0.5 + 0.5) * h
+        msg.el.style.display = 'block'
+        msg.el.style.left = `${x}px`
+        msg.el.style.top = `${y}px`
+      }
     }
     this.renderer.render(this.scene, this.camera)
   }
@@ -1197,6 +1259,8 @@ export class Game {
     this.projectiles.forEach((p) => this.scene.remove(p.mesh))
     this.explosions.forEach((e) => this.scene.remove(e.mesh))
     this.powerUpEffects.forEach((e) => this.scene.remove(e.group))
+    this.staminaGainMessages.forEach((m) => m.el.remove())
+    this.staminaGainMessages = []
     this.targets = []
     this.projectiles = []
     this.explosions = []
