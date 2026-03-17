@@ -86,6 +86,7 @@ export class Game {
     this.mobileMoveTouchId = null
     this.mobileMoveStart = null
     this.mobileMoveVector = { dx: 0, dz: 0 }
+    this._footstepsAudio = null
   }
 
   _allocateSmallSphereIndex() {
@@ -326,6 +327,40 @@ export class Game {
     } catch (_) {}
   }
 
+  _ensureFootstepsLoop() {
+    if (this._footstepsAudio || !this._footstepsUrl) return
+    try {
+      const footsteps = new Audio(this._footstepsUrl)
+      footsteps.loop = true
+      footsteps.preload = 'auto'
+      footsteps.volume = 0.16 * this._masterVolume
+      this._footstepsAudio = footsteps
+    } catch (_) {}
+  }
+
+  _startFootstepsLoop() {
+    if (this._isMenuOpen()) return
+    this._ensureFootstepsLoop()
+    if (!this._footstepsAudio) return
+    this._footstepsAudio.volume = 0.16 * this._masterVolume
+    const playPromise = this._footstepsAudio.play()
+    if (playPromise && typeof playPromise.catch === 'function') playPromise.catch(() => {})
+  }
+
+  _stopFootstepsLoop() {
+    if (!this._footstepsAudio) return
+    this._footstepsAudio.pause()
+    this._footstepsAudio.currentTime = 0
+  }
+
+  _syncFootstepsLoop(isMoving) {
+    if (!isMoving || this._isMenuOpen()) {
+      this._stopFootstepsLoop()
+      return
+    }
+    this._startFootstepsLoop()
+  }
+
   _detectMobileDevice() {
     if (typeof navigator === 'undefined' || typeof window === 'undefined') return false
     const touchCapable = navigator.maxTouchPoints > 0
@@ -407,6 +442,7 @@ export class Game {
     this._hitSoundUrl = baseUrl + 'hit.wav'
     this._powerUpSoundUrl = baseUrl + 'powerup.wav'
     this._bootupSoundUrl = baseUrl + 'bootingup.wav'
+    this._footstepsUrl = baseUrl + 'footsteps.wav'
     this._hitSoundBuffer = null
     this._bootupSoundBuffer = null
     this._audioContext = null
@@ -660,6 +696,7 @@ export class Game {
         game._masterVolume = Math.min(1, Math.max(0, parseFloat(input.value) / 100))
         if (typeof localStorage !== 'undefined') localStorage.setItem('dotShooterMasterVolume', String(game._masterVolume))
         container.querySelectorAll('.master-volume-input').forEach((el) => { el.value = input.value })
+        if (game._footstepsAudio) game._footstepsAudio.volume = 0.16 * game._masterVolume
       })
     })
   }
@@ -689,6 +726,7 @@ export class Game {
     this.gameOverEl.querySelector('#game-over-score').textContent = this.score
     this.gameOverEl.style.display = 'flex'
     this._pauseAllBigBoxBootupSounds()
+    this._stopFootstepsLoop()
   }
 
   _submitGameOverScore() {
@@ -844,12 +882,14 @@ export class Game {
   update(delta) {
     const gamepad = this._getGamepadState()
     if (!this.started) {
+      this._stopFootstepsLoop()
       if (gamepad && gamepad.aPressed && !this._prevGamepadA) this._onStartGame()
       this._prevGamepadA = gamepad ? gamepad.aPressed : false
       this._prevGamepadStart = gamepad ? gamepad.startPressed : false
       return
     }
     if (this.paused) {
+      this._stopFootstepsLoop()
       if (gamepad && gamepad.startPressed && !this._prevGamepadStart) {
         this.paused = false
         this.pauseMenuEl.style.display = 'none'
@@ -860,6 +900,7 @@ export class Game {
       return
     }
     if (this.gameOver) {
+      this._stopFootstepsLoop()
       if (gamepad && gamepad.aPressed && !this._prevGamepadA) this.reset()
       this._prevGamepadA = gamepad ? gamepad.aPressed : false
       this._prevGamepadStart = gamepad ? gamepad.startPressed : false
@@ -879,7 +920,11 @@ export class Game {
     const gamepadMove = gamepad && gamepad.move ? gamepad.move : null
     const touchMove = this.mobileMoveTouchId != null ? this.mobileMoveVector : null
     const movementInput = gamepadMove || touchMove
+    const prevX = this.player.mesh.position.x
+    const prevZ = this.player.mesh.position.z
     this.player.update(delta, this.keys, this.targets, movementInput)
+    const moved = Math.abs(this.player.mesh.position.x - prevX) > 0.0001 || Math.abs(this.player.mesh.position.z - prevZ) > 0.0001
+    this._syncFootstepsLoop(moved)
 
     if (this._audioContext && this._audioContext.state !== 'closed' && this.player?.mesh?.position) {
       const p = this.player.mesh.position
@@ -1320,6 +1365,7 @@ export class Game {
   }
 
   reset() {
+    this._stopFootstepsLoop()
     this._leftoverDelta = 0
     if (this._lastFrameTime != null) this._lastFrameTime = performance.now() / 1000
     this.spawnPreviewCircles.forEach((c) => this.scene.remove(c))
