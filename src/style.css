@@ -207,6 +207,33 @@ body,
   height: 100%;
 }
 
+#mobile-move-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 23.333%;
+  z-index: 8;
+  background: rgba(255, 255, 255, 0.12);
+  border-top: 1px solid rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.8);
+  font-family: var(--tui-font);
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#mobile-move-panel.active {
+  background: rgba(255, 255, 255, 0.18);
+}
+
 /* TUI tokens for overlays and menus (retro terminal aesthetic) */
 #app {
   --tui-fg: #f2f2f2;

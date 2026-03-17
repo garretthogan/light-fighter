@@ -81,6 +81,11 @@ export class Game {
     this._hiddenMatrix = new THREE.Matrix4().makeScale(0.001, 0.001, 0.001)
     this.staminaGainMessages = []
     this.STAMINA_GAIN_MESSAGE_DURATION_MS = 2500
+    this.isMobileDevice = this._detectMobileDevice()
+    this.mobileMovePanelEl = null
+    this.mobileMoveTouchId = null
+    this.mobileMoveStart = null
+    this.mobileMoveVector = { dx: 0, dz: 0 }
   }
 
   _allocateSmallSphereIndex() {
@@ -319,6 +324,79 @@ export class Game {
       s.volume = 0.5 * this._masterVolume
       s.play().catch(() => {})
     } catch (_) {}
+  }
+
+  _detectMobileDevice() {
+    if (typeof navigator === 'undefined' || typeof window === 'undefined') return false
+    const touchCapable = navigator.maxTouchPoints > 0
+    const coarsePointer = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches
+    const ua = navigator.userAgent || ''
+    const mobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)
+    return touchCapable && (coarsePointer || mobileUA)
+  }
+
+  _createMobileMovePanel() {
+    if (!this.isMobileDevice || !this.canvas?.parentElement || this.mobileMovePanelEl) return
+    const panel = document.createElement('div')
+    panel.id = 'mobile-move-panel'
+    panel.setAttribute('aria-label', 'Movement control area')
+    panel.setAttribute('role', 'region')
+    panel.textContent = 'Swipe to move'
+    this.canvas.parentElement.appendChild(panel)
+    this.mobileMovePanelEl = panel
+
+    panel.addEventListener('touchstart', (event) => this._onMobileMoveStart(event), { passive: false })
+    panel.addEventListener('touchmove', (event) => this._onMobileMoveMove(event), { passive: false })
+    panel.addEventListener('touchend', (event) => this._onMobileMoveEnd(event), { passive: false })
+    panel.addEventListener('touchcancel', (event) => this._onMobileMoveEnd(event), { passive: false })
+  }
+
+  _updateMobileMoveFromTouch(touch) {
+    if (!this.mobileMoveStart || !this.mobileMovePanelEl || !touch) return
+    const dxPx = touch.clientX - this.mobileMoveStart.x
+    const dyPx = touch.clientY - this.mobileMoveStart.y
+    const maxRadius = Math.min(120, Math.max(60, this.mobileMovePanelEl.clientHeight * 0.4))
+    const len = Math.hypot(dxPx, dyPx)
+    if (len < 6) {
+      this.mobileMoveVector.dx = 0
+      this.mobileMoveVector.dz = 0
+      return
+    }
+    const clamped = Math.min(1, len / maxRadius)
+    this.mobileMoveVector.dx = (dxPx / len) * clamped
+    this.mobileMoveVector.dz = (dyPx / len) * clamped
+  }
+
+  _onMobileMoveStart(event) {
+    if (!this.mobileMovePanelEl) return
+    event.preventDefault()
+    const touch = event.changedTouches[0]
+    if (!touch) return
+    this.mobileMoveTouchId = touch.identifier
+    this.mobileMoveStart = { x: touch.clientX, y: touch.clientY }
+    this.mobileMoveVector.dx = 0
+    this.mobileMoveVector.dz = 0
+    this.mobileMovePanelEl.classList.add('active')
+  }
+
+  _onMobileMoveMove(event) {
+    if (this.mobileMoveTouchId == null) return
+    event.preventDefault()
+    const activeTouch = Array.from(event.changedTouches).find((touch) => touch.identifier === this.mobileMoveTouchId)
+    if (!activeTouch) return
+    this._updateMobileMoveFromTouch(activeTouch)
+  }
+
+  _onMobileMoveEnd(event) {
+    if (this.mobileMoveTouchId == null) return
+    const endedTouch = Array.from(event.changedTouches).find((touch) => touch.identifier === this.mobileMoveTouchId)
+    if (!endedTouch) return
+    event.preventDefault()
+    this.mobileMoveTouchId = null
+    this.mobileMoveStart = null
+    this.mobileMoveVector.dx = 0
+    this.mobileMoveVector.dz = 0
+    if (this.mobileMovePanelEl) this.mobileMovePanelEl.classList.remove('active')
   }
 
   async init() {
@@ -569,6 +647,7 @@ export class Game {
     this.canvas.parentElement.appendChild(this.pauseMenuEl)
     this.pauseMenuEl.querySelector('#resume-btn').addEventListener('click', () => this._onResume())
     this._bindMasterVolumeInputs()
+    this._createMobileMovePanel()
   }
 
   _bindMasterVolumeInputs() {
@@ -798,7 +877,9 @@ export class Game {
       this.canvas.requestPointerLock()
     }
     const gamepadMove = gamepad && gamepad.move ? gamepad.move : null
-    this.player.update(delta, this.keys, this.targets, gamepadMove)
+    const touchMove = this.mobileMoveTouchId != null ? this.mobileMoveVector : null
+    const movementInput = gamepadMove || touchMove
+    this.player.update(delta, this.keys, this.targets, movementInput)
 
     if (this._audioContext && this._audioContext.state !== 'closed' && this.player?.mesh?.position) {
       const p = this.player.mesh.position
