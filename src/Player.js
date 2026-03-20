@@ -3,6 +3,7 @@ import { Projectile } from './Projectile.js'
 
 const PINK = 0xff00ff
 const FIRE_COOLDOWN_MS = 450
+const AUTO_FIRE_START_MULTIPLIER = 1.35
 const FIRE_COOLDOWN_MULTIPLIER_MIN = 0.4
 const RATE_OF_FIRE_UPGRADE_MULTIPLIER = 0.8
 const MOVE_SPEED = 5
@@ -137,6 +138,11 @@ export class Player {
     const velocity = this.aimDirection.clone().multiplyScalar(18)
     velocity.y = 0
     return new Projectile(origin, velocity)
+  }
+
+  enableAutoAimFire() {
+    this.autoAimFire = true
+    this.fireCooldownMultiplier = Math.max(this.fireCooldownMultiplier, AUTO_FIRE_START_MULTIPLIER)
   }
 
   increaseRateOfFire() {

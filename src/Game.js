@@ -46,6 +46,7 @@ export class Game {
     this.cameraOffset = new THREE.Vector3(12, 14, 12)
     this.CAMERA_FOLLOW_THRESHOLD = 2
     this.CAMERA_FOLLOW_SPEED = 12
+    this.CAMERA_BASE_FRUSTUM_SIZE = 20
     this.lastMovingSphereSpawn = 0
     this.SPAWN_INTERVAL_MAX_MS = 12000
     this.SPAWN_INTERVAL_MIN_MS = 1400
@@ -370,13 +371,26 @@ export class Game {
     return touchCapable && (coarsePointer || mobileUA)
   }
 
+  _getResponsiveFrustumSize(aspect) {
+    return this.CAMERA_BASE_FRUSTUM_SIZE
+  }
+
   _createMobileMovePanel() {
     if (!this.isMobileDevice || !this.canvas?.parentElement || this.mobileMovePanelEl) return
+    this.canvas.parentElement.classList.add('is-mobile-device')
     const panel = document.createElement('div')
     panel.id = 'mobile-move-panel'
     panel.setAttribute('aria-label', 'Movement control area')
     panel.setAttribute('role', 'region')
-    panel.textContent = 'Swipe to move'
+    panel.innerHTML = `
+      <div class="mobile-move-compass" aria-hidden="true">
+        <span class="dir up">^</span>
+        <span class="dir right">^</span>
+        <span class="dir down">^</span>
+        <span class="dir left">^</span>
+      </div>
+      <div class="mobile-move-label">Swipe to move</div>
+    `
     this.canvas.parentElement.appendChild(panel)
     this.mobileMovePanelEl = panel
 
@@ -467,7 +481,7 @@ export class Game {
 
     this.scene = new THREE.Scene()
     const aspect = this.canvas.clientWidth / this.canvas.clientHeight
-    const frustumSize = 20
+    const frustumSize = this._getResponsiveFrustumSize(aspect)
     this.camera = new THREE.OrthographicCamera(
       -frustumSize * aspect * 0.5,
       frustumSize * aspect * 0.5,
@@ -524,6 +538,7 @@ export class Game {
     for (let i = 0; i < this.MAX_ARMORED_SPHERES; i++) this._largeSphereFree.push(i)
 
     this.player = new Player()
+    if (this.isMobileDevice) this.player.enableAutoAimFire()
     this.scene.add(this.player.mesh)
 
     this.spawnFactory = new SpawnFactory({
@@ -808,7 +823,7 @@ export class Game {
     const w = this.canvas.clientWidth
     const h = this.canvas.clientHeight
     const aspect = w / h
-    const frustumSize = 20
+    const frustumSize = this._getResponsiveFrustumSize(aspect)
     this.camera.left = -frustumSize * aspect * 0.5
     this.camera.right = frustumSize * aspect * 0.5
     this.camera.top = frustumSize * 0.5
@@ -1036,7 +1051,7 @@ export class Game {
             if (hit.target.willGrantAbility) {
               this._playPowerUpSound()
               if (!this.player.autoAimFire) {
-                this.player.autoAimFire = true
+                this.player.enableAutoAimFire()
               } else {
                 this.player.increaseRateOfFire()
               }
@@ -1414,8 +1429,8 @@ export class Game {
     this.targets.push(capsuleTarget)
     this.scene.add(capsuleTarget.mesh)
 
-    this.player.autoAimFire = false
     this.player.fireCooldownMultiplier = 1.0
+    if (this.isMobileDevice) this.player.enableAutoAimFire()
     this.score = 0
     this.clock = new THREE.Clock()
     this.lastMovingSphereSpawn = 0
