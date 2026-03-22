@@ -455,3 +455,40 @@ body,
 .tui-btn-danger:hover {
   border-color: var(--tui-pink);
 }
+
+#power-up-menu-overlay .tui-modal-card {
+  min-width: min(360px, calc(100vw - 24px));
+  width: min(360px, calc(100vw - 24px));
+  box-sizing: border-box;
+  padding: 1.25rem 1rem;
+}
+
+#power-up-menu-overlay .tui-btn {
+  display: block;
+  width: 100%;
+  margin-bottom: 10px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#power-up-menu-overlay .tui-btn:last-of-type {
+  margin-bottom: 0;
+}
+
+@media (max-width: 480px) {
+  #power-up-menu-overlay .tui-modal-card {
+    min-width: calc(100vw - 16px);
+    width: calc(100vw - 16px);
+    padding: 1rem 0.75rem;
+  }
+
+  #power-up-menu-overlay .tui-modal-title {
+    font-size: 1.1rem;
+    margin-bottom: 0.75rem;
+  }
+
+  #power-up-menu-overlay .tui-modal-stats {
+    font-size: 0.92rem;
+    margin-bottom: 1rem;
+  }
+}

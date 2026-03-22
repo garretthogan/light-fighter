@@ -20,8 +20,8 @@ export class Game {
     this.pendingRespawns = []
     this.pendingBigBoxRespawns = []
     this.RESPAWN_DELAY_MS = 7000
-    this.BIG_BOX_RESPAWN_MS_MIN = 10000
-    this.BIG_BOX_RESPAWN_MS_MAX = 15000
+    this.BIG_BOX_RESPAWN_MS_MIN = 6000
+    this.BIG_BOX_RESPAWN_MS_MAX = 10000
     this.BIG_BOX_PREVIEW_BEFORE_MS = 5000
     this.bigBoxPositions = [
       [14, 0, 14],
@@ -47,6 +47,7 @@ export class Game {
     this.CAMERA_FOLLOW_THRESHOLD = 2
     this.CAMERA_FOLLOW_SPEED = 12
     this.CAMERA_BASE_FRUSTUM_SIZE = 20
+    this.CAMERA_MOBILE_FRUSTUM_MULTIPLIER = 1.35
     this.lastMovingSphereSpawn = 0
     this.SPAWN_INTERVAL_MAX_MS = 12000
     this.SPAWN_INTERVAL_MIN_MS = 1400
@@ -57,6 +58,7 @@ export class Game {
     this.gameOver = false
     this.started = false
     this.paused = false
+    this.awaitingPowerUpChoice = false
     const stored = typeof localStorage !== 'undefined' && localStorage.getItem('dotShooterMasterVolume')
     this._masterVolume = stored != null ? Math.min(1, Math.max(0, parseFloat(stored))) : 1
     this._prevGamepadA = false
@@ -253,6 +255,7 @@ export class Game {
     return (
       (this.startMenuEl && this.startMenuEl.style.display !== 'none') ||
       (this.pauseMenuEl && this.pauseMenuEl.style.display !== 'none') ||
+      (this.powerUpMenuEl && this.powerUpMenuEl.style.display !== 'none') ||
       (this.gameOverEl && this.gameOverEl.style.display !== 'none')
     )
   }
@@ -372,6 +375,7 @@ export class Game {
   }
 
   _getResponsiveFrustumSize(aspect) {
+    if (this.isMobileDevice) return this.CAMERA_BASE_FRUSTUM_SIZE * this.CAMERA_MOBILE_FRUSTUM_MULTIPLIER
     return this.CAMERA_BASE_FRUSTUM_SIZE
   }
 
@@ -538,7 +542,7 @@ export class Game {
     for (let i = 0; i < this.MAX_ARMORED_SPHERES; i++) this._largeSphereFree.push(i)
 
     this.player = new Player()
-    if (this.isMobileDevice) this.player.enableAutoAimFire()
+    this.player.enableAutoAimFire()
     this.scene.add(this.player.mesh)
 
     this.spawnFactory = new SpawnFactory({
@@ -583,8 +587,20 @@ export class Game {
     window.addEventListener('keydown', (e) => {
       this.keys[e.code] = true
       if (e.code === 'Space') e.preventDefault()
+      if (this.awaitingPowerUpChoice) {
+        if (e.code === 'Digit1' || e.code === 'Numpad1') {
+          this._applyPowerUpChoice('rateOfFire')
+          e.preventDefault()
+          return
+        }
+        if (e.code === 'Digit2' || e.code === 'Numpad2') {
+          this._applyPowerUpChoice('staminaBurn')
+          e.preventDefault()
+          return
+        }
+      }
       if (e.code === 'Escape') {
-        if (this.started && !this.gameOver) {
+        if (this.started && !this.gameOver && !this.awaitingPowerUpChoice) {
           this.paused = !this.paused
           this.pauseMenuEl.style.display = this.paused ? 'flex' : 'none'
           if (this.paused) this._pauseAllBigBoxBootupSounds()
@@ -609,39 +625,46 @@ export class Game {
     this.noStaminaEl.setAttribute('aria-live', 'polite')
     this.canvas.parentElement.appendChild(this.noStaminaEl)
     this._leaderboardEntries = []
-    this.leaderboardEl = document.createElement('div')
-    this.leaderboardEl.id = 'leaderboard-panel'
-    this.leaderboardEl.className = 'tui-panel collapsed'
-    this.leaderboardEl.innerHTML = `
-      <button type="button" class="tui-panel-header" aria-expanded="false">
-        <span class="tui-panel-chevron" aria-hidden="true">▼</span>
-        <span class="tui-panel-title">Leaderboard</span>
-        <span id="fps-display" class="tui-fps-in-header"></span>
-      </button>
-      <div class="tui-panel-content">
-        <div id="leaderboard-loading" class="tui-leaderboard-loading" aria-live="polite">
-          <span class="tui-leaderboard-spinner" aria-hidden="true"></span>
-          <span>Loading…</span>
+    this.leaderboardEl = null
+    this.leaderboardLoadingEl = null
+    this.leaderboardTableWrapEl = null
+    this.leaderboardTbody = null
+    this.fpsEl = null
+    if (!this.isMobileDevice) {
+      this.leaderboardEl = document.createElement('div')
+      this.leaderboardEl.id = 'leaderboard-panel'
+      this.leaderboardEl.className = 'tui-panel collapsed'
+      this.leaderboardEl.innerHTML = `
+        <button type="button" class="tui-panel-header" aria-expanded="false">
+          <span class="tui-panel-chevron" aria-hidden="true">▼</span>
+          <span class="tui-panel-title">Leaderboard</span>
+          <span id="fps-display" class="tui-fps-in-header"></span>
+        </button>
+        <div class="tui-panel-content">
+          <div id="leaderboard-loading" class="tui-leaderboard-loading" aria-live="polite">
+            <span class="tui-leaderboard-spinner" aria-hidden="true"></span>
+            <span>Loading…</span>
+          </div>
+          <div id="leaderboard-table-wrap" class="tui-leaderboard-table-wrap" hidden>
+            <table class="tui-leaderboard-table">
+              <thead><tr><th>#</th><th>Name</th><th>Pts</th><th>Time</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
-        <div id="leaderboard-table-wrap" class="tui-leaderboard-table-wrap" hidden>
-          <table class="tui-leaderboard-table">
-            <thead><tr><th>#</th><th>Name</th><th>Pts</th><th>Time</th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-    `
-    this.canvas.parentElement.appendChild(this.leaderboardEl)
-    this.leaderboardLoadingEl = this.leaderboardEl.querySelector('#leaderboard-loading')
-    this.leaderboardTableWrapEl = this.leaderboardEl.querySelector('#leaderboard-table-wrap')
-    this.leaderboardTbody = this.leaderboardEl.querySelector('.tui-leaderboard-table tbody')
-    this.fpsEl = this.leaderboardEl.querySelector('#fps-display')
-    const header = this.leaderboardEl.querySelector('.tui-panel-header')
-    header.addEventListener('click', () => {
-      const collapsed = this.leaderboardEl.classList.toggle('collapsed')
-      header.setAttribute('aria-expanded', !collapsed)
-    })
-    this._fetchLeaderboard()
+      `
+      this.canvas.parentElement.appendChild(this.leaderboardEl)
+      this.leaderboardLoadingEl = this.leaderboardEl.querySelector('#leaderboard-loading')
+      this.leaderboardTableWrapEl = this.leaderboardEl.querySelector('#leaderboard-table-wrap')
+      this.leaderboardTbody = this.leaderboardEl.querySelector('.tui-leaderboard-table tbody')
+      this.fpsEl = this.leaderboardEl.querySelector('#fps-display')
+      const header = this.leaderboardEl.querySelector('.tui-panel-header')
+      header.addEventListener('click', () => {
+        const collapsed = this.leaderboardEl.classList.toggle('collapsed')
+        header.setAttribute('aria-expanded', !collapsed)
+      })
+      this._fetchLeaderboard()
+    }
 
     this.gameOverEl = document.createElement('div')
     this.gameOverEl.id = 'game-over-overlay'
@@ -697,6 +720,23 @@ export class Game {
     `
     this.canvas.parentElement.appendChild(this.pauseMenuEl)
     this.pauseMenuEl.querySelector('#resume-btn').addEventListener('click', () => this._onResume())
+
+    this.powerUpMenuEl = document.createElement('div')
+    this.powerUpMenuEl.id = 'power-up-menu-overlay'
+    this.powerUpMenuEl.className = 'tui-overlay'
+    this.powerUpMenuEl.style.display = 'none'
+    this.powerUpMenuEl.innerHTML = `
+      <div class="tui-modal-card">
+        <h2 class="tui-modal-title">Choose Upgrade</h2>
+        <p class="tui-modal-stats">Power cube collected</p>
+        <button id="upgrade-rate-of-fire-btn" class="tui-btn tui-btn-primary">Spray n Pray</button>
+        <button id="upgrade-stamina-burn-btn" class="tui-btn tui-btn-primary">Ultra Marathon Training</button>
+      </div>
+    `
+    this.canvas.parentElement.appendChild(this.powerUpMenuEl)
+    this.powerUpMenuEl.querySelector('#upgrade-rate-of-fire-btn').addEventListener('click', () => this._applyPowerUpChoice('rateOfFire'))
+    this.powerUpMenuEl.querySelector('#upgrade-stamina-burn-btn').addEventListener('click', () => this._applyPowerUpChoice('staminaBurn'))
+
     this._bindMasterVolumeInputs()
     this._createMobileMovePanel()
   }
@@ -723,7 +763,29 @@ export class Game {
   }
 
   _onResume() {
+    if (this.awaitingPowerUpChoice) return
     this.pauseMenuEl.style.display = 'none'
+    this.paused = false
+  }
+
+  _showPowerUpChoiceMenu() {
+    this.awaitingPowerUpChoice = true
+    this.paused = true
+    this.pauseMenuEl.style.display = 'none'
+    this.powerUpMenuEl.style.display = 'flex'
+    this._pauseAllBigBoxBootupSounds()
+    this._stopFootstepsLoop()
+  }
+
+  _applyPowerUpChoice(choice) {
+    if (!this.awaitingPowerUpChoice) return
+    if (choice === 'rateOfFire') {
+      this.player.increaseRateOfFire()
+    } else if (choice === 'staminaBurn') {
+      this.player.decreaseStaminaBurnSpeed()
+    }
+    this.powerUpMenuEl.style.display = 'none'
+    this.awaitingPowerUpChoice = false
     this.paused = false
   }
 
@@ -905,6 +967,11 @@ export class Game {
     }
     if (this.paused) {
       this._stopFootstepsLoop()
+      if (this.awaitingPowerUpChoice) {
+        this._prevGamepadA = gamepad ? gamepad.aPressed : false
+        this._prevGamepadStart = gamepad ? gamepad.startPressed : false
+        return
+      }
       if (gamepad && gamepad.startPressed && !this._prevGamepadStart) {
         this.paused = false
         this.pauseMenuEl.style.display = 'none'
@@ -1050,11 +1117,7 @@ export class Game {
           } else if (hit.target.respawnAsBigBox) {
             if (hit.target.willGrantAbility) {
               this._playPowerUpSound()
-              if (!this.player.autoAimFire) {
-                this.player.enableAutoAimFire()
-              } else {
-                this.player.increaseRateOfFire()
-              }
+              this._showPowerUpChoiceMenu()
               const powerUp = this.spawnFactory.createPowerUpEffect(pos.x, pos.y, pos.z)
               this.powerUpEffects.push(powerUp)
               this.scene.add(powerUp.group)
@@ -1430,7 +1493,7 @@ export class Game {
     this.scene.add(capsuleTarget.mesh)
 
     this.player.fireCooldownMultiplier = 1.0
-    if (this.isMobileDevice) this.player.enableAutoAimFire()
+    this.player.enableAutoAimFire()
     this.score = 0
     this.clock = new THREE.Clock()
     this.lastMovingSphereSpawn = 0
@@ -1439,6 +1502,10 @@ export class Game {
     this.forceNextBigBoxGreen = false
     this.cameraTarget.set(0, 0, 0)
     this.gameOver = false
+    this.awaitingPowerUpChoice = false
+    this.paused = false
+    this.pauseMenuEl.style.display = 'none'
+    if (this.powerUpMenuEl) this.powerUpMenuEl.style.display = 'none'
     this._hideGameOver()
   }
 

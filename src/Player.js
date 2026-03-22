@@ -13,6 +13,8 @@ const PLAYER_RADIUS = 0.25
 const TARGET_HALF = 0.3
 const STAMINA_MAX = 100
 const STAMINA_DRAIN_PER_SEC = 20
+const STAMINA_DRAIN_MULTIPLIER_MIN = 0.4
+const STAMINA_BURN_UPGRADE_MULTIPLIER = 0.85
 
 export class Player {
   constructor() {
@@ -30,6 +32,7 @@ export class Player {
     this.lastFireTime = 0
     this.autoAimFire = false
     this.fireCooldownMultiplier = 1.0
+    this.staminaDrainMultiplier = 1.0
     this.stamina = STAMINA_MAX
     this._buildArrow()
   }
@@ -102,7 +105,7 @@ export class Player {
         this.mesh.position.x = ox
         this.mesh.position.z = oz
       } else {
-        this.stamina = Math.max(0, this.stamina - STAMINA_DRAIN_PER_SEC * delta)
+        this.stamina = Math.max(0, this.stamina - STAMINA_DRAIN_PER_SEC * this.staminaDrainMultiplier * delta)
       }
     }
     this.tryingToMoveNoStamina = (dx !== 0 || dz !== 0) && !canMove
@@ -147,5 +150,12 @@ export class Player {
 
   increaseRateOfFire() {
     this.fireCooldownMultiplier = Math.max(FIRE_COOLDOWN_MULTIPLIER_MIN, this.fireCooldownMultiplier * RATE_OF_FIRE_UPGRADE_MULTIPLIER)
+  }
+
+  decreaseStaminaBurnSpeed() {
+    this.staminaDrainMultiplier = Math.max(
+      STAMINA_DRAIN_MULTIPLIER_MIN,
+      this.staminaDrainMultiplier * STAMINA_BURN_UPGRADE_MULTIPLIER
+    )
   }
 }

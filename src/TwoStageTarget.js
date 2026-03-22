@@ -21,8 +21,7 @@ export class TwoStageTarget {
     this._abilityTexture = abilityTexture
     this.willGrantAbility =
       forceAbilityGrant ||
-      (!playerAlreadyHasAbility &&
-        gameElapsedSeconds >= ABILITY_GRANT_AFTER_SECONDS &&
+      (gameElapsedSeconds >= ABILITY_GRANT_AFTER_SECONDS &&
         Math.random() < ABILITY_GRANT_CHANCE)
     this._buildBig(cx, y, cz, texture)
   }
