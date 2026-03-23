@@ -13,7 +13,6 @@ body,
 #app {
   cursor: crosshair;
   position: relative;
-  --mobile-move-panel-height: 23.333%;
 }
 
 #survival-timer {
@@ -208,96 +207,45 @@ body,
   height: 100%;
 }
 
-#mobile-move-panel {
+#mobile-joystick {
   position: absolute;
   left: 0;
-  right: 0;
-  bottom: 0;
-  height: var(--mobile-move-panel-height);
+  top: 0;
+  width: 0;
+  height: 0;
   z-index: 8;
-  background: rgba(255, 255, 255, 0.12);
-  border-top: 1px solid rgba(255, 255, 255, 0.3);
-  color: rgba(255, 255, 255, 0.8);
-  font-family: var(--tui-font);
-  font-size: 14px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: auto;
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.08s linear;
 }
 
-#mobile-move-panel.active {
+#mobile-joystick.active {
+  opacity: 1;
+}
+
+#mobile-joystick .mobile-joystick-base {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.08);
+  transform: translate(-50%, -50%);
+}
+
+#mobile-joystick .mobile-joystick-thumb {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.55);
   background: rgba(255, 255, 255, 0.18);
-}
-
-#mobile-move-panel .mobile-move-compass {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  --mobile-compass-radius: clamp(46px, 12vw, 80px);
-  --mobile-compass-radius-x: calc(var(--mobile-compass-radius) + 14px);
-}
-
-#mobile-move-panel .mobile-move-compass .dir {
-  position: absolute;
-  font-family: var(--tui-font);
-  font-size: 18px;
-  font-weight: 700;
-  width: 1em;
-  height: 1em;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-  color: rgba(255, 255, 255, 0.75);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
-}
-
-#mobile-move-panel .mobile-move-compass .up {
-  left: 50%;
-  top: calc(50% - var(--mobile-compass-radius));
-  transform: translate(-50%, -50%) rotate(0deg);
-}
-
-#mobile-move-panel .mobile-move-compass .right {
-  left: calc(50% + var(--mobile-compass-radius-x));
-  top: 50%;
-  transform: translate(-50%, -50%) rotate(90deg);
-}
-
-#mobile-move-panel .mobile-move-compass .down {
-  left: 50%;
-  top: calc(50% + var(--mobile-compass-radius));
-  transform: translate(-50%, -50%) rotate(180deg);
-}
-
-#mobile-move-panel .mobile-move-compass .left {
-  left: calc(50% - var(--mobile-compass-radius-x));
-  top: 50%;
-  transform: translate(-50%, -50%) rotate(-90deg);
-}
-
-#mobile-move-panel .mobile-move-label {
-  position: relative;
-  z-index: 1;
-  pointer-events: none;
-}
-
-#app.is-mobile-device #score-display {
-  bottom: calc(var(--mobile-move-panel-height) + 12px);
-}
-
-#app.is-mobile-device #stamina-display {
-  bottom: calc(var(--mobile-move-panel-height) + 40px);
-}
-
-#app.is-mobile-device #survival-timer {
-  bottom: calc(var(--mobile-move-panel-height) + 12px);
+  transform: translate(-50%, -50%);
+  will-change: transform;
 }
 
 /* TUI tokens for overlays and menus (retro terminal aesthetic) */

@@ -85,10 +85,12 @@ export class Game {
     this.staminaGainMessages = []
     this.STAMINA_GAIN_MESSAGE_DURATION_MS = 2500
     this.isMobileDevice = this._detectMobileDevice()
-    this.mobileMovePanelEl = null
+    this.mobileJoystickEl = null
+    this.mobileJoystickThumbEl = null
     this.mobileMoveTouchId = null
     this.mobileMoveStart = null
     this.mobileMoveVector = { dx: 0, dz: 0 }
+    this.mobileMoveMaxRadiusPx = 64
     this._footstepsAudio = null
   }
 
@@ -379,49 +381,72 @@ export class Game {
     return this.CAMERA_BASE_FRUSTUM_SIZE
   }
 
-  _createMobileMovePanel() {
-    if (!this.isMobileDevice || !this.canvas?.parentElement || this.mobileMovePanelEl) return
+  _createMobileJoystick() {
+    if (!this.isMobileDevice || !this.canvas?.parentElement || this.mobileJoystickEl) return
     this.canvas.parentElement.classList.add('is-mobile-device')
-    const panel = document.createElement('div')
-    panel.id = 'mobile-move-panel'
-    panel.setAttribute('aria-label', 'Movement control area')
-    panel.setAttribute('role', 'region')
-    panel.innerHTML = `
-      <div class="mobile-move-compass" aria-hidden="true">
-        <span class="dir up">^</span>
-        <span class="dir right">^</span>
-        <span class="dir down">^</span>
-        <span class="dir left">^</span>
-      </div>
-      <div class="mobile-move-label">Swipe to move</div>
+    const container = this.canvas.parentElement
+    const joystick = document.createElement('div')
+    joystick.id = 'mobile-joystick'
+    joystick.setAttribute('aria-hidden', 'true')
+    joystick.innerHTML = `
+      <div class="mobile-joystick-base"></div>
+      <div class="mobile-joystick-thumb"></div>
     `
-    this.canvas.parentElement.appendChild(panel)
-    this.mobileMovePanelEl = panel
+    container.appendChild(joystick)
+    this.mobileJoystickEl = joystick
+    this.mobileJoystickThumbEl = joystick.querySelector('.mobile-joystick-thumb')
 
-    panel.addEventListener('touchstart', (event) => this._onMobileMoveStart(event), { passive: false })
-    panel.addEventListener('touchmove', (event) => this._onMobileMoveMove(event), { passive: false })
-    panel.addEventListener('touchend', (event) => this._onMobileMoveEnd(event), { passive: false })
-    panel.addEventListener('touchcancel', (event) => this._onMobileMoveEnd(event), { passive: false })
+    container.addEventListener('touchstart', (event) => this._onMobileMoveStart(event), { passive: false })
+    container.addEventListener('touchmove', (event) => this._onMobileMoveMove(event), { passive: false })
+    container.addEventListener('touchend', (event) => this._onMobileMoveEnd(event), { passive: false })
+    container.addEventListener('touchcancel', (event) => this._onMobileMoveEnd(event), { passive: false })
+  }
+
+  _setMobileJoystickVisual(active, x = 0, y = 0, thumbX = 0, thumbY = 0) {
+    if (!this.mobileJoystickEl) return
+    if (active) {
+      this.mobileJoystickEl.style.left = `${x}px`
+      this.mobileJoystickEl.style.top = `${y}px`
+      this.mobileJoystickEl.classList.add('active')
+    } else {
+      this.mobileJoystickEl.classList.remove('active')
+    }
+    if (this.mobileJoystickThumbEl) {
+      this.mobileJoystickThumbEl.style.transform = `translate(calc(-50% + ${thumbX}px), calc(-50% + ${thumbY}px))`
+    }
   }
 
   _updateMobileMoveFromTouch(touch) {
-    if (!this.mobileMoveStart || !this.mobileMovePanelEl || !touch) return
+    if (!this.mobileMoveStart || !this.mobileJoystickEl || !touch) return
     const dxPx = touch.clientX - this.mobileMoveStart.x
     const dyPx = touch.clientY - this.mobileMoveStart.y
-    const maxRadius = Math.min(120, Math.max(60, this.mobileMovePanelEl.clientHeight * 0.4))
+    const maxRadius = this.mobileMoveMaxRadiusPx
     const len = Math.hypot(dxPx, dyPx)
     if (len < 6) {
       this.mobileMoveVector.dx = 0
       this.mobileMoveVector.dz = 0
+      this._setMobileJoystickVisual(true, this.mobileMoveStart.x, this.mobileMoveStart.y, 0, 0)
       return
     }
-    const clamped = Math.min(1, len / maxRadius)
-    this.mobileMoveVector.dx = (dxPx / len) * clamped
-    this.mobileMoveVector.dz = (dyPx / len) * clamped
+    const dirX = dxPx / len
+    const dirY = dyPx / len
+    const clampedRadius = Math.min(maxRadius, len)
+    const clampedStrength = Math.min(1, len / maxRadius)
+    this.mobileMoveVector.dx = dirX * clampedStrength
+    this.mobileMoveVector.dz = dirY * clampedStrength
+    this._setMobileJoystickVisual(
+      true,
+      this.mobileMoveStart.x,
+      this.mobileMoveStart.y,
+      dirX * clampedRadius,
+      dirY * clampedRadius
+    )
   }
 
   _onMobileMoveStart(event) {
-    if (!this.mobileMovePanelEl) return
+    if (!this.mobileJoystickEl || this.mobileMoveTouchId != null || this._isMenuOpen()) return
+    const targetEl = event.target instanceof Element ? event.target : null
+    if (targetEl && targetEl.closest('button, input, select, textarea, a, #leaderboard-panel')) return
     event.preventDefault()
     const touch = event.changedTouches[0]
     if (!touch) return
@@ -429,7 +454,7 @@ export class Game {
     this.mobileMoveStart = { x: touch.clientX, y: touch.clientY }
     this.mobileMoveVector.dx = 0
     this.mobileMoveVector.dz = 0
-    this.mobileMovePanelEl.classList.add('active')
+    this._setMobileJoystickVisual(true, touch.clientX, touch.clientY, 0, 0)
   }
 
   _onMobileMoveMove(event) {
@@ -449,7 +474,7 @@ export class Game {
     this.mobileMoveStart = null
     this.mobileMoveVector.dx = 0
     this.mobileMoveVector.dz = 0
-    if (this.mobileMovePanelEl) this.mobileMovePanelEl.classList.remove('active')
+    this._setMobileJoystickVisual(false, 0, 0, 0, 0)
   }
 
   async init() {
@@ -738,7 +763,7 @@ export class Game {
     this.powerUpMenuEl.querySelector('#upgrade-stamina-burn-btn').addEventListener('click', () => this._applyPowerUpChoice('staminaBurn'))
 
     this._bindMasterVolumeInputs()
-    this._createMobileMovePanel()
+    this._createMobileJoystick()
   }
 
   _bindMasterVolumeInputs() {
