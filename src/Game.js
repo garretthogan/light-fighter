@@ -339,7 +339,7 @@ export class Game {
       const footsteps = new Audio(this._footstepsUrl)
       footsteps.loop = true
       footsteps.preload = 'auto'
-      footsteps.volume = 0.16 * this._masterVolume
+      footsteps.volume = 0
       this._footstepsAudio = footsteps
     } catch (_) {}
   }
@@ -348,7 +348,7 @@ export class Game {
     if (this._isMenuOpen()) return
     this._ensureFootstepsLoop()
     if (!this._footstepsAudio) return
-    this._footstepsAudio.volume = 0.16 * this._masterVolume
+    this._footstepsAudio.volume = 0
     const playPromise = this._footstepsAudio.play()
     if (playPromise && typeof playPromise.catch === 'function') playPromise.catch(() => {})
   }
@@ -776,7 +776,7 @@ export class Game {
         game._masterVolume = Math.min(1, Math.max(0, parseFloat(input.value) / 100))
         if (typeof localStorage !== 'undefined') localStorage.setItem('dotShooterMasterVolume', String(game._masterVolume))
         container.querySelectorAll('.master-volume-input').forEach((el) => { el.value = input.value })
-        if (game._footstepsAudio) game._footstepsAudio.volume = 0.16 * game._masterVolume
+        if (game._footstepsAudio) game._footstepsAudio.volume = 0
       })
     })
   }
